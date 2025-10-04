@@ -1,0 +1,2 @@
+- [ ] Update selectedBloom type from any to proper BloomData type
+- [ ] Update BloomModal usage to pass correct props (isOpen, onClose, data) and remove conditional rendering
