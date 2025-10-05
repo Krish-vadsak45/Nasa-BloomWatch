@@ -111,7 +111,9 @@ export default function DashboardPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [modalData, setModalData] = useState<any>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [searchPoints, setSearchPoints] = useState<any>(null);
+  const [searchPoints, setSearchPoints] = useState<
+    FeatureCollection<Point> | undefined
+  >(undefined);
   const [ndviChoropleth, setNdviChoropleth] = useState<
     Feature | FeatureCollection | undefined
   >();
@@ -138,6 +140,10 @@ export default function DashboardPage() {
       }
     } catch (error) {
       // Fallback: use Mapbox forward geocoding to get coords, then center/zoom and open modal
+      console.warn(
+        "Primary /api/search failed; attempting Mapbox geocoding fallback",
+        error
+      );
       try {
         const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
         if (!token) throw new Error("Missing NEXT_PUBLIC_MAPBOX_TOKEN");
@@ -164,7 +170,7 @@ export default function DashboardPage() {
           }
           if (aoi) {
             setSelectedLocation(aoi);
-            setSearchPoints(null);
+            setSearchPoints(undefined);
             const [lng, lat] =
               Array.isArray(feat.center) && feat.center.length === 2
                 ? feat.center
