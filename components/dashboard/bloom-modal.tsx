@@ -20,20 +20,31 @@ import {
 import { motion } from "framer-motion";
 
 interface BloomModalProps {
-  isOpen: boolean;
-  onClose: () => void;
-  data: {
-    coords: { lng: number; lat: number };
-    peakBloomDate: string | null;
-    bloomIntensity: number;
-    timeSeries: { date: string; ndvi: number; bloom_prob: number }[];
+  readonly isOpen: boolean;
+  readonly onClose: () => void;
+  readonly data: {
+    readonly coords: { lng: number; lat: number };
+    readonly peakBloomDate: string | null;
+    readonly bloomIntensity: number;
+    readonly timeSeries: { date: string; ndvi: number; bloom_prob: number }[];
+    readonly cloudSeries?: { date: string; value: number }[];
+    readonly windSeries?: { date: string; value: number }[];
+    readonly landCoverSummary?: { label: string; count: number }[];
   } | null;
 }
 
 export function BloomModal({ isOpen, onClose, data }: BloomModalProps) {
   if (!data) return null;
 
-  const { coords, peakBloomDate, bloomIntensity, timeSeries } = data;
+  const {
+    coords,
+    peakBloomDate,
+    bloomIntensity,
+    timeSeries,
+    cloudSeries,
+    windSeries,
+    landCoverSummary,
+  } = data;
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
@@ -69,6 +80,41 @@ export function BloomModal({ isOpen, onClose, data }: BloomModalProps) {
               </h4>
               <p className="text-xl font-semibold text-white">
                 {bloomIntensity.toFixed(2)} / 1.00
+              </p>
+            </div>
+          </div>
+          {/* Quick environmental context */}
+          <div className="mt-4 grid grid-cols-3 gap-4 text-center">
+            <div className="p-3 bg-gray-800 rounded-lg">
+              <h4 className="text-xs font-medium text-gray-400">
+                Avg Cloudiness
+              </h4>
+              <p className="text-lg font-semibold text-white">
+                {cloudSeries?.length
+                  ? `${(
+                      cloudSeries.reduce((a, b) => a + b.value, 0) /
+                      cloudSeries.length
+                    ).toFixed(2)}`
+                  : "-"}
+              </p>
+            </div>
+            <div className="p-3 bg-gray-800 rounded-lg">
+              <h4 className="text-xs font-medium text-gray-400">Avg Wind</h4>
+              <p className="text-lg font-semibold text-white">
+                {windSeries?.length
+                  ? `${(
+                      windSeries.reduce((a, b) => a + b.value, 0) /
+                      windSeries.length
+                    ).toFixed(2)} m/s`
+                  : "-"}
+              </p>
+            </div>
+            <div className="p-3 bg-gray-800 rounded-lg">
+              <h4 className="text-xs font-medium text-gray-400">
+                Top Land Cover
+              </h4>
+              <p className="text-sm font-semibold text-white">
+                {landCoverSummary?.length ? landCoverSummary[0].label : "-"}
               </p>
             </div>
           </div>

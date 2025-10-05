@@ -5,12 +5,18 @@ import { Navbar } from "@/components/navbar";
 import { ControlPanel } from "@/components/dashboard/control-panel";
 import { TimelineSlider } from "@/components/dashboard/timeline-slider";
 import { BloomModal } from "@/components/dashboard/bloom-modal";
-import { Feature } from "geojson";
+import { Feature, FeatureCollection, Point } from "geojson";
 import { DateRange } from "react-day-picker";
 import axios from "axios";
 import dynamic from "next/dynamic";
 import "mapbox-gl/dist/mapbox-gl.css";
 import center from "@turf/center";
+import bboxPolygon from "@turf/bbox-polygon";
+import {
+  DUMMY_MODE,
+  dummyChoroplethWithin,
+  dummyPointsWithin,
+} from "@/lib/dummy-data";
 
 // Dynamically import the MapView component to prevent SSR issues with mapbox-gl
 const MapView = dynamic(
@@ -105,6 +111,13 @@ export default function DashboardPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [modalData, setModalData] = useState<any>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [searchPoints, setSearchPoints] = useState<any>(null);
+  const [ndviChoropleth, setNdviChoropleth] = useState<
+    Feature | FeatureCollection | undefined
+  >();
+  const [bloomHeatmap, setBloomHeatmap] = useState<
+    FeatureCollection<Point> | undefined
+  >();
 
   const handleSearch = async (query: string) => {
     setIsLoading(true);
@@ -113,17 +126,59 @@ export default function DashboardPage() {
         `/api/search?query=${encodeURIComponent(query)}`
       );
       const geojson = response.data.geojson as Feature;
+      const points = response.data.points;
       setSelectedLocation(geojson);
+      setSearchPoints(points);
 
       // Automatically analyze the center of the searched area
-      if (geojson && geojson.geometry) {
+      if (geojson?.geometry) {
         const centerPoint = center(geojson);
         const [lng, lat] = centerPoint.geometry.coordinates;
         await handleMapClick({ lng, lat });
       }
     } catch (error) {
-      console.error("Search failed:", error);
-      // You might want to show a toast notification here
+      // Fallback: use Mapbox forward geocoding to get coords, then center/zoom and open modal
+      try {
+        const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
+        if (!token) throw new Error("Missing NEXT_PUBLIC_MAPBOX_TOKEN");
+        const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(
+          query
+        )}.json?limit=1&access_token=${token}`;
+        const geo = await fetch(url);
+        const gj = await geo.json();
+        const feat = gj?.features?.[0];
+        if (feat) {
+          // Create an AOI from bbox if available, otherwise a small buffer around the center
+          let aoi: Feature | null = null;
+          if (feat.bbox && Array.isArray(feat.bbox) && feat.bbox.length === 4) {
+            aoi = bboxPolygon(feat.bbox) as unknown as Feature;
+          } else if (Array.isArray(feat.center) && feat.center.length === 2) {
+            const [clng, clat] = feat.center;
+            const delta = 0.05; // ~5km bbox
+            aoi = bboxPolygon([
+              clng - delta,
+              clat - delta,
+              clng + delta,
+              clat + delta,
+            ]) as unknown as Feature;
+          }
+          if (aoi) {
+            setSelectedLocation(aoi);
+            setSearchPoints(null);
+            const [lng, lat] =
+              Array.isArray(feat.center) && feat.center.length === 2
+                ? feat.center
+                : center(aoi).geometry.coordinates;
+            await handleMapClick({ lng, lat });
+          } else {
+            console.warn("Geocoding return had no bbox/center for:", query);
+          }
+        } else {
+          console.warn("No geocoding results for query:", query);
+        }
+      } catch (gerr) {
+        console.error("Fallback geocoding failed:", gerr);
+      }
     } finally {
       setIsLoading(false);
     }
@@ -135,8 +190,24 @@ export default function DashboardPage() {
 
   const handleLayerToggle = (layer: string, enabled: boolean) => {
     setMapLayers((prev) => ({ ...prev, [layer]: enabled }));
-    // Here you would trigger data fetching for the layer if it's enabled
-    // For example: if (layer === 'sentinel' && enabled) fetchSentinelData();
+    // When dummy mode is ON and AOI is present, generate synthetic layers
+    if (!selectedLocation) return;
+    if (DUMMY_MODE) {
+      if (layer === "modis") {
+        if (enabled) {
+          setNdviChoropleth(dummyChoroplethWithin(selectedLocation));
+        } else {
+          setNdviChoropleth(undefined);
+        }
+      }
+      if (layer === "heatmap") {
+        if (enabled) {
+          setBloomHeatmap(dummyPointsWithin(selectedLocation, 100));
+        } else {
+          setBloomHeatmap(undefined);
+        }
+      }
+    }
   };
 
   const handleRegionChange = (regionKey: string) => {
@@ -149,37 +220,67 @@ export default function DashboardPage() {
   };
 
   const handleMapClick = async (coords: { lng: number; lat: number }) => {
-    // For a map click, we create a small AOI around the point
-    const pointGeoJSON: Feature = {
-      type: "Feature",
-      properties: {},
-      geometry: {
-        type: "Point",
-        coordinates: [coords.lng, coords.lat],
-      },
-    };
-
     setIsLoading(true);
+    let aoi: Feature | null = null;
     try {
-      // 1. Fetch NDVI data for the point
-      const ndviResponse = await axios.post("/api/landsat", {
-        aoi: pointGeoJSON,
+      // Try to get city/region polygon first
+      const r = await fetch(
+        `/api/bounds?lat=${encodeURIComponent(
+          coords.lat
+        )}&lon=${encodeURIComponent(coords.lng)}`,
+        { cache: "no-store" }
+      );
+      if (r.ok) {
+        const data = await r.json();
+        if (data?.feature?.geometry) {
+          aoi = data.feature as Feature;
+        }
+      }
+    } catch (e) {
+      console.warn("City boundary fetch failed; will use rectangle", e);
+    }
+    // Fallback: small rectangle if no polygon found
+    if (!aoi) {
+      const delta = 0.03;
+      aoi = bboxPolygon([
+        coords.lng - delta,
+        coords.lat - delta,
+        coords.lng + delta,
+        coords.lat + delta,
+      ]) as unknown as Feature;
+    }
+    setSelectedLocation(aoi);
+    // Refresh dummy layers for new AOI when toggles are on
+    if (DUMMY_MODE) {
+      if (mapLayers.modis) setNdviChoropleth(dummyChoroplethWithin(aoi));
+      if (mapLayers.heatmap) setBloomHeatmap(dummyPointsWithin(aoi, 100));
+    }
+
+    try {
+      const resp = await axios.post("/api/local-insights", {
+        lng: coords.lng,
+        lat: coords.lat,
         startDate: dateRange?.from?.toISOString(),
         endDate: dateRange?.to?.toISOString(),
       });
 
-      // 2. Run bloom detection on the NDVI data
-      const bloomResponse = await axios.post("/api/bloom-detect", {
-        ndviSeries: ndviResponse.data.ndviSeries,
-      });
-
+      const d = resp.data;
       setModalData({
         coords,
-        ...bloomResponse.data,
+        peakBloomDate: d.peakBloomDate,
+        bloomIntensity: d.bloomIntensity,
+        timeSeries: (d.ndviSeries || []).map((it: any) => ({
+          date: it.date,
+          ndvi: it.ndvi,
+          bloom_prob: it.ndvi, // simple proxy for now
+        })),
+        cloudSeries: d.cloudSeries,
+        windSeries: d.windSeries,
+        landCoverSummary: d.landCoverSummary,
       });
       setIsModalOpen(true);
     } catch (error) {
-      console.error("Failed to get bloom data for point:", error);
+      console.error("Failed to get local insights for point:", error);
     } finally {
       setIsLoading(false);
     }
@@ -194,6 +295,9 @@ export default function DashboardPage() {
             selectedLocation={selectedLocation}
             mapLayers={mapLayers}
             onMapClick={handleMapClick}
+            ndviChoropleth={ndviChoropleth}
+            bloomHeatmap={bloomHeatmap}
+            searchPointsGeoJSON={searchPoints}
           />
         </main>
         <aside className="absolute top-4 left-4 z-10 w-1/4 min-w-[350px] max-w-[450px]">

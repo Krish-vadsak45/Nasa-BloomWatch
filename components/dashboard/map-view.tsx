@@ -1,17 +1,17 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Map, {
   Source,
   Layer,
   NavigationControl,
   FullscreenControl,
 } from "react-map-gl/mapbox";
-import type { ViewStateChangeEvent } from "react-map-gl/mapbox";
-import type { MapMouseEvent } from "mapbox-gl";
+import type { ViewStateChangeEvent, MapRef } from "react-map-gl/mapbox";
 import "mapbox-gl/dist/mapbox-gl.css";
-import { Feature } from "geojson";
+import { Feature, FeatureCollection, Point } from "geojson";
 import { BloomModal } from "./bloom-modal";
+import bbox from "@turf/bbox";
 
 type BloomData = {
   coords: { lng: number; lat: number };
@@ -26,8 +26,9 @@ interface MapViewProps {
   readonly mapLayers: { [key: string]: boolean };
   readonly onMapClick: (coords: { lng: number; lat: number }) => void;
   readonly sentinelTileUrl?: string;
-  readonly ndviChoropleth?: Feature;
-  readonly bloomHeatmap?: Feature;
+  readonly ndviChoropleth?: Feature | FeatureCollection;
+  readonly bloomHeatmap?: FeatureCollection<Point>;
+  readonly searchPointsGeoJSON?: FeatureCollection<Point>;
 }
 
 const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
@@ -39,6 +40,7 @@ export function MapView({
   sentinelTileUrl,
   ndviChoropleth,
   bloomHeatmap,
+  searchPointsGeoJSON,
 }: MapViewProps) {
   const [viewState, setViewState] = useState({
     longitude: -100,
@@ -46,18 +48,43 @@ export function MapView({
     zoom: 3,
   });
 
+  const mapRef = useRef<MapRef | null>(null);
+
   const [selectedBloom, setSelectedBloom] = useState<BloomData | null>(null);
 
   const handleMapClick = (event: any) => {
     // event.lngLat is available on mapbox-gl events
-    if (event && event.lngLat) {
+    if (event?.lngLat) {
       onMapClick({ lng: event.lngLat.lng, lat: event.lngLat.lat });
     }
   };
 
+  // Fit map to selected AOI when it changes
+  useEffect(() => {
+    if (selectedLocation && mapRef.current) {
+      try {
+        const b = bbox(selectedLocation) as [number, number, number, number];
+        const [[minLng, minLat], [maxLng, maxLat]] = [
+          [b[0], b[1]],
+          [b[2], b[3]],
+        ];
+        mapRef.current.fitBounds(
+          [
+            [minLng, minLat],
+            [maxLng, maxLat],
+          ],
+          { padding: 60, duration: 1000 }
+        );
+      } catch (e) {
+        console.warn("Failed to fit bounds for AOI", e);
+      }
+    }
+  }, [selectedLocation]);
+
   return (
     <div className="h-full w-full rounded-lg overflow-hidden">
       <Map
+        ref={mapRef}
         initialViewState={viewState}
         onMove={(evt: ViewStateChangeEvent) => setViewState(evt.viewState)}
         style={{ width: "100%", height: "100%" }}
@@ -85,6 +112,23 @@ export function MapView({
               paint={{
                 "line-color": "#0dd",
                 "line-width": 2,
+              }}
+            />
+          </Source>
+        )}
+
+        {/* Search result points */}
+        {searchPointsGeoJSON && searchPointsGeoJSON.features.length > 0 && (
+          <Source id="search-points" type="geojson" data={searchPointsGeoJSON}>
+            <Layer
+              id="search-points-layer"
+              type="circle"
+              paint={{
+                "circle-radius": 5,
+                "circle-color": "#00e5ff",
+                "circle-opacity": 0.9,
+                "circle-stroke-width": 1,
+                "circle-stroke-color": "#00151a",
               }}
             />
           </Source>
