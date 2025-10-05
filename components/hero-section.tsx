@@ -24,7 +24,7 @@ export function HeroSection() {
       <div className="relative z-10 flex w-full flex-col items-center justify-center text-center">
         <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-primary/30 bg-primary/10 px-4 py-2 text-sm font-medium text-primary backdrop-blur-sm">
           <Sparkles className="h-4 w-4" />
-          NASA Space Apps Challenge 2024
+          NASA Space Apps Challenge 2025
         </div>
 
         <h1 className="mb-6 max-w-3xl text-balance text-4xl font-bold leading-tight tracking-tight sm:text-5xl lg:text-6xl">

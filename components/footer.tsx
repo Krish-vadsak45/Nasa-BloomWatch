@@ -94,7 +94,7 @@ export function Footer() {
         </div>
 
         <div className="mt-8 border-t border-border/40 pt-8 text-center text-sm text-muted-foreground">
-          <p>Powered by NASA Data • Built for NASA Space Apps Challenge 2024</p>
+          <p>Powered by NASA Data • Built for NASA Space Apps Challenge 2025</p>
         </div>
       </div>
     </footer>
